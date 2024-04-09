@@ -4,6 +4,8 @@ const { BotFrameworkAdapter, ActivityHandler } = require("botbuilder");
 const { MongoClient } = require("mongodb");
 const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
+const { searchFAQs } = require("./database.js"); // ตรวจสอบว่า path ถูกต้อง
+const { parse } = require("dotenv");
 
 // MongoDB connection
 const uri = process.env.MONGODB_URI;
@@ -37,12 +39,15 @@ const adapter = new BotFrameworkAdapter({
 class UniversityBot extends ActivityHandler {
   constructor() {
     super();
+    this.lastFAQResults = []; //สำหรับเก็บคำถามล่าสุดของUser
     // ส่วนต้อนรับสมาชิกใหม่
     this.onMembersAdded(async (context, next) => {
       const membersAdded = context.activity.membersAdded;
       for (let member of membersAdded) {
         if (member.id !== context.activity.recipient.id) {
-          await context.sendActivity("สวัสดี! ฉันสามารถช่วยให้ข้อมูลเกี่ยวกับการลงทะเบียน, กิจกรรมมหาวิทยาลัย, หรือบริการสุขภาพนักศึกษา. คุณต้องการทราบข้อมูลเรื่องใด? สามารถใช้คำสั่ง Show FAQS");
+          await context.sendActivity(
+            "สวัสดี! ฉันสามารถช่วยให้ข้อมูลเกี่ยวกับการลงทะเบียน, กิจกรรมมหาวิทยาลัย, หรือบริการสุขภาพนักศึกษา. คุณต้องการทราบข้อมูลเรื่องใด? หากมีข้อสงสัยเบื้องต้นท่านสามารถใช้คีย์เวิร์ดในการค้นหาคำหรือใช้คำสั่ง 'Show FAQs'ได้"
+          );
         }
       }
       await next();
@@ -52,60 +57,59 @@ class UniversityBot extends ActivityHandler {
     this.onMessage(async (context, next) => {
       const text = context.activity.text.trim().toLowerCase();
 
-      if (text === "show faqs") {
+      // ตรวจสอบว่าข้อความเป็นตัวเลขเท่านั้น
+      if (!isNaN(text) && parseInt(text) > 0) {
+        const index = parseInt(text) - 1; // แปลงเป็น index ของอาร์เรย์
+        if (index >= 0 && index < this.lastFAQResults.length) {
+          const selectedFAQ = this.lastFAQResults[index];
+          await context.sendActivity(
+            `Q: ${selectedFAQ.question}\nA: ${selectedFAQ.answer}`
+          );
+        } else {
+          await context.sendActivity("กรุณาพิมพ์หมายเลขที่ถูกต้องจากรายการ.");
+        }
+      } else if (text === "show faqs") {
         const faqs = await getFAQs();
         if (faqs.length > 0) {
-          const response = faqs
-            .map((faq) => `Q: ${faq.question}\nA: ${faq.answer}`)
-            .join("\n\n");
+          let response = "FAQs:\n\n";
+          faqs.forEach((faq, index) => {
+            response += `${index + 1}. Q: ${faq.question}\nA: ${
+              faq.answer
+            }\n\n`;
+          });
           await context.sendActivity(response);
         } else {
-          await context.sendActivity("No FAQs available.");
+          await context.sendActivity("ไม่มี FAQs ในขณะนี้.");
         }
       } else {
-        // ส่วนจัดการข้อความต่างๆ
-        // ตรวจสอบและจัดการข้อความ "สภาพอากาศ"
-        if (text.startsWith("สภาพอากาศ")) {
-          // ตัดคำว่า "สภาพอากาศ " ออกและใช้สิ่งที่เหลือเป็นข้อมูลสำหรับ API
-          const query = text.substring("สภาพอากาศ ".length);
-          if (query) {
-            const weatherResponse = await getWeather(query);
-            await context.sendActivity(weatherResponse);
-          } else {
+        const indexInput = text.match(/^\d+$/); // ตรวจสอบว่าเป็นตัวเลขเท่านั้น
+        if (indexInput) {
+          const index = parseInt(indexInput[0]) - 1;
+          if (index >= 0 && index < this.lastFAQResults.length) {
+            const selectedFAQ = this.lastFAQResults[index];
             await context.sendActivity(
-              'กรุณาระบุชื่อเมือง เช่น "สภาพอากาศ Bangkok, TH"'
+              `Q: ${selectedFAQ.question}\nA: ${selectedFAQ.answer}`
             );
+          } else {
+            await context.sendActivity("กรุณาพิมพ์หมายเลขที่ถูกต้องจากรายการ.");
           }
         } else {
-          // ส่วนตอบกลับคำถามอื่นๆ
-          await context.sendActivity(
-            "ฉันเสียใจ ท่านสามารถกลับเข้ามาสอบถามใหม่ในภายหลังจากที่เราอัพเดตข้อมูล"
-          );
+          const faqResults = await searchFAQs(text);
+          if (faqResults.length > 0) {
+            let response = "พบคำถามใกล้เคียงดังนี้:\n\n";
+            faqResults.forEach((faq, index) => {
+              response += `${index + 1}. ${faq.question}\n`;
+            });
+            response += "\nกรุณาพิมพ์หมายเลขเพื่อดูคำตอบ.";
+            await context.sendActivity(response);
+            this.lastFAQResults = faqResults; // บันทึกรายการคำถามล่าสุด
+          } else {
+            await context.sendActivity("ไม่พบคำถามที่ใกล้เคียงกับคำถามของคุณ.");
+          }
         }
       }
       await next();
     });
-  }
-}
-
-// ฟังก์ชั่นเรียกข้อมูลสภาพอากาศ
-async function getWeather(city) {
-  const apiKey = process.env.OPENWEATHERMAP_API_KEY;
-  const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(
-    city
-  )}&appid=${apiKey}&units=metric`;
-
-  try {
-    const response = await fetch(url);
-    const data = await response.json();
-    if (data && data.main && data.weather) {
-      return `ใน ${city}, อุณหภูมิคือ ${data.main.temp}°C, สภาพอากาศคือ ${data.weather[0].description}.`;
-    } else {
-      return `ไม่พบข้อมูลสภาพอากาศสำหรับ ${city}.`;
-    }
-  } catch (error) {
-    console.error("Error:", error);
-    return `เกิดข้อผิดพลาดในการเรียกข้อมูลสภาพอากาศสำหรับ ${city}.`;
   }
 }
 
@@ -124,8 +128,9 @@ server.post("/api/messages", async (req, res) => {
       await bot.run(context);
     });
   } catch (error) {
-    console.error('Error handling message:', error);
-    res.status(500).send({ error: 'An error occurred while handling your request.' });
+    console.error("Error handling message:", error);
+    res
+      .status(500)
+      .send({ error: "An error occurred while handling your request." });
   }
 });
-

@@ -16,25 +16,16 @@ async function connectToDatabase() {
   }
 }
 
-async function searchFAQ(question) {
+async function searchFAQs(question) {
   try {
     const database = client.db("projectCPE");
     const faqsCollection = database.collection("FAQs");
-
-    // ค้นหาข้อมูลตามคำถามโดยใช้ Regular Expression เพื่อให้ค้นหาได้แม้ว่าจะไม่ตรงตามข้อความแบบเต็ม
-    const result = await faqsCollection.findOne({ question: { $regex: question, $options: 'i' } });
-
-    if (result) {
-      // ถ้าพบคำถามที่ใกล้เคียงกัน
-      return { question: result.question, answer: result.answer };
-    } else {
-      // ถ้าไม่พบคำถามที่ใกล้เคียงกัน
-      return null;
-    }
+    const results = await faqsCollection.find({ question: { $regex: question, $options: 'i' } }).toArray();
+    return results.map(result => ({ question: result.question, answer: result.answer }));
   } catch (error) {
     console.error("Error searching FAQs:", error);
-    return null;
+    return [];
   }
 }
 
-module.exports = { connectToDatabase, searchFAQ };
+module.exports = { connectToDatabase, searchFAQs };
