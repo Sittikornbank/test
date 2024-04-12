@@ -4,8 +4,7 @@ const { BotFrameworkAdapter, ActivityHandler } = require("botbuilder");
 const { MongoClient } = require("mongodb");
 const fetch = (...args) =>
   import("node-fetch").then(({ default: fetch }) => fetch(...args));
-const { searchFAQs } = require("./database.js"); // ตรวจสอบว่า path ถูกต้อง
-const { parse } = require("dotenv");
+const { searchFAQs } = require("./database.js");
 
 // MongoDB connection
 const uri = process.env.MONGODB_URI;
@@ -30,6 +29,7 @@ async function getFAQs() {
     return [];
   }
 }
+
 const server = restify.createServer();
 const adapter = new BotFrameworkAdapter({
   appId: process.env.MicrosoftAppId,
@@ -39,8 +39,7 @@ const adapter = new BotFrameworkAdapter({
 class UniversityBot extends ActivityHandler {
   constructor() {
     super();
-    this.lastFAQResults = []; //สำหรับเก็บคำถามล่าสุดของUser
-    // ส่วนต้อนรับสมาชิกใหม่
+    this.lastFAQResults = []; // For storing the most recent FAQ search results
     this.onMembersAdded(async (context, next) => {
       const membersAdded = context.activity.membersAdded;
       for (let member of membersAdded) {
@@ -53,22 +52,11 @@ class UniversityBot extends ActivityHandler {
       await next();
     });
 
-    // ส่วนจัดการข้อความ
     this.onMessage(async (context, next) => {
       const text = context.activity.text.trim().toLowerCase();
+      console.log("Received message:", text); // Log received message
 
-      // ตรวจสอบว่าข้อความเป็นตัวเลขเท่านั้น
-      if (!isNaN(text) && parseInt(text) > 0) {
-        const index = parseInt(text) - 1; // แปลงเป็น index ของอาร์เรย์
-        if (index >= 0 && index < this.lastFAQResults.length) {
-          const selectedFAQ = this.lastFAQResults[index];
-          await context.sendActivity(
-            `Q: ${selectedFAQ.question}\nA: ${selectedFAQ.answer}`
-          );
-        } else {
-          await context.sendActivity("กรุณาพิมพ์หมายเลขที่ถูกต้องจากรายการ.");
-        }
-      } else if (text === "show faqs") {
+      if (text === "show faqs") {
         const faqs = await getFAQs();
         if (faqs.length > 0) {
           let response = "FAQs:\n\n";
@@ -82,19 +70,25 @@ class UniversityBot extends ActivityHandler {
           await context.sendActivity("ไม่มี FAQs ในขณะนี้.");
         }
       } else {
-        const indexInput = text.match(/^\d+$/); // ตรวจสอบว่าเป็นตัวเลขเท่านั้น
-        if (indexInput) {
-          const index = parseInt(indexInput[0]) - 1;
-          if (index >= 0 && index < this.lastFAQResults.length) {
-            const selectedFAQ = this.lastFAQResults[index];
-            await context.sendActivity(
-              `Q: ${selectedFAQ.question}\nA: ${selectedFAQ.answer}`
-            );
-          } else {
-            await context.sendActivity("กรุณาพิมพ์หมายเลขที่ถูกต้องจากรายการ.");
-          }
-        } else {
+        const numberInput = parseInt(text);
+        console.log("Parsed number input:", numberInput); // Log parsed number input
+
+        if (
+          !isNaN(numberInput) &&
+          numberInput >= 1 &&
+          numberInput <= this.lastFAQResults.length
+        ) {
+          const index = numberInput - 1;
+          const selectedFAQ = this.lastFAQResults[index];
+          console.log("Selected FAQ:", selectedFAQ); // Log เพื่อตรวจสอบคำถามที่เลือก
+          await context.sendActivity(
+            `Q: ${selectedFAQ.question}\nA: ${selectedFAQ.answer}`
+          );
+        } else if (!text.match(/^\d+$/)) {
+          // If the input is not purely numeric, assume it's a search query
           const faqResults = await searchFAQs(text);
+          console.log("Search results:", faqResults); // Log search results
+          
           if (faqResults.length > 0) {
             let response = "พบคำถามใกล้เคียงดังนี้:\n\n";
             faqResults.forEach((faq, index) => {
@@ -102,10 +96,13 @@ class UniversityBot extends ActivityHandler {
             });
             response += "\nกรุณาพิมพ์หมายเลขเพื่อดูคำตอบ.";
             await context.sendActivity(response);
-            this.lastFAQResults = faqResults; // บันทึกรายการคำถามล่าสุด
+            this.lastFAQResults = faqResults; // Update the last FAQ results
           } else {
             await context.sendActivity("ไม่พบคำถามที่ใกล้เคียงกับคำถามของคุณ.");
           }
+        } else {
+          // If it's a number but not valid for selection
+          await context.sendActivity("กรุณาพิมพ์หมายเลขที่ถูกต้องจากรายการ.");
         }
       }
       await next();
@@ -113,9 +110,6 @@ class UniversityBot extends ActivityHandler {
   }
 }
 
-// สร้างและกำหนดค่าเซิร์ฟเวอร์
-
-// ที่ส่วนการสร้าง server
 server.listen(process.env.PORT || 3978, async function () {
   console.log(`${server.name} listening to ${server.url}`);
   await connectToDatabase();
