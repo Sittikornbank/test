@@ -1,18 +1,27 @@
 const { MongoClient } = require("mongodb");
 
-// ตรวจสอบให้แน่ใจว่าคุณได้ระบุ MONGODB_URI ในไฟล์ .env ของคุณ
 const uri = process.env.MONGODB_URI;
 
-// สร้าง instance ของ MongoClient
 const client = new MongoClient(uri);
 
 async function connectToDatabase() {
   try {
-    // ต่อกับ MongoDB
     await client.connect();
     console.log("Connected to MongoDB");
   } catch (error) {
     console.error("Could not connect to MongoDB:", error);
+    throw new Error("Database connection error");
+  }
+}
+
+async function getFAQs() {
+  try {
+    const database = client.db("projectCPE");
+    const faqsCollection = database.collection("FAQs");
+    return await faqsCollection.find({}).toArray();
+  } catch (error) {
+    console.error("Error fetching FAQs:", error);
+    return [];
   }
 }
 
@@ -28,4 +37,14 @@ async function searchFAQs(question) {
   }
 }
 
-module.exports = { connectToDatabase, searchFAQs };
+async function saveUnansweredQuestion(question) {
+  try {
+    const unansweredQuestionsCollection = client.db("projectCPE").collection("UnansweredQuestions");
+    await unansweredQuestionsCollection.insertOne({ question });
+    console.log("Saved unanswered question");
+  } catch (error) {
+    console.error("Error saving unanswered question:", error);
+  }
+}
+
+module.exports = { connectToDatabase, getFAQs, searchFAQs, saveUnansweredQuestion };
