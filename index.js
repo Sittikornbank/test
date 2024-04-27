@@ -1,12 +1,13 @@
-require("dotenv").config();
+require("dotenv").config(); // โหลดตัวแปรสภาพแวดล้อมจากไฟล์ .env
 const restify = require("restify");
 const { BotFrameworkAdapter, ActivityHandler } = require("botbuilder");
-const { MongoClient } = require("mongodb");
+const { MongoClient } = require("mongodb"); // อิมพอร์ต MongoClient
+const { findURLsWithKeywords } = require("./searchKeywords.js"); // ฟังก์ชันค้นหา URL ตามคำหลัก
 const { FAQHandler } = require("./faqHandler.js");
 const { UnansweredQuestionHandler } = require("./unansweredQuestionHandler.js");
 const { connectToDatabase } = require("./database.js");
 
-// MongoDB connection
+// การตั้งค่า MongoDB
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri);
 
@@ -19,15 +20,15 @@ const adapter = new BotFrameworkAdapter({
 class UniversityBot extends ActivityHandler {
   constructor() {
     super();
-    this.faqHandler = new FAQHandler();
-    this.unansweredHandler = new UnansweredQuestionHandler();
+    this.faqHandler = new FAQHandler(); // จัดการกับคำถาม FAQs
+    this.unansweredHandler = new UnansweredQuestionHandler(); // จัดการกับคำถามที่ยังไม่มีคำตอบ
 
     this.onMembersAdded(async (context, next) => {
       const membersAdded = context.activity.membersAdded;
-      for (let member of membersAdded) {
+      for (const member of membersAdded) {
         if (member.id !== context.activity.recipient.id) {
           await context.sendActivity(
-            "สวัสดี! ฉันสามารถช่วยให้ข้อมูลเกี่ยวกับการลงทะเบียน, กิจกรรมมหาวิทยาลัย, หรือบริการสุขภาพนักศึกษา. คุณต้องการทราบข้อมูลเรื่องใด? หากมีข้อสงสัยเบื้องต้นท่านสามารถใช้คีย์เวิร์ดในการค้นหาคำหรือใช้คำสั่ง 'Show FAQs' ได้"
+            "สวัสดี! ฉันสามารถช่วยให้ข้อมูลเกี่ยวกับการลงทะเบียน, กิจกรรมมหาวิทยาลัย, หรือบริการสุขภาพนักศึกษา. หากมีข้อสงสัยเบื้องต้น ท่านสามารถใช้คีย์เวิร์ดในการค้นหาคำ หรือใช้คำสั่ง 'Show FAQs' ได้"
           );
         }
       }
@@ -35,13 +36,20 @@ class UniversityBot extends ActivityHandler {
     });
 
     this.onMessage(async (context, next) => {
-      const text = context.activity.text.trim().toLowerCase();
-      console.log("Received message:", text); // บันทึกข้อความที่ได้รับ
+      const text = context.activity.text.trim().toLowerCase(); // ข้อความที่ได้รับ
+      const keywords = text.split(" "); // แยกคำหลักตามคำที่ได้รับ
 
-      // ใช้ FAQHandler และ UnansweredQuestionHandler เพื่อจัดการข้อความ
-      await this.faqHandler.handleMessage(context, text);
-      await this.unansweredHandler.handleMessage(context, text);
+      const matchingURLs = await findURLsWithKeywords(keywords); // ค้นหา URL ตามคำหลัก
+      let response = "ไม่พบ URL ที่เกี่ยวข้องกับคำค้นของคุณ.";
 
+      if (matchingURLs.length > 0) {
+        response = "URLs ที่เกี่ยวข้อง:\n"; // แสดง URL ที่เกี่ยวข้อง
+        matchingURLs.forEach((url) => {
+          response += `${url}\n`; // เพิ่ม URL ในคำตอบ
+        });
+      }
+
+      await context.sendActivity(response); // ส่งคำตอบกลับ
       await next();
     });
   }
@@ -49,7 +57,7 @@ class UniversityBot extends ActivityHandler {
 
 server.listen(process.env.PORT || 3978, async function () {
   console.log(`${server.name} listening to ${server.url}`);
-  await connectToDatabase();
+  await connectToDatabase(); // เชื่อมต่อกับ MongoDB
 });
 
 server.post("/api/messages", async (req, res) => {
@@ -66,4 +74,4 @@ server.post("/api/messages", async (req, res) => {
   }
 });
 
-module.exports = server;
+module.exports = { UniversityBot }; // ส่งออกคลาสแชทบอท
