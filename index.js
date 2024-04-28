@@ -1,14 +1,12 @@
 require("dotenv").config(); // โหลดตัวแปรสภาพแวดล้อมจากไฟล์ .env
 const restify = require("restify");
 const { BotFrameworkAdapter, ActivityHandler } = require("botbuilder");
-const { MongoClient } = require("mongodb"); // อิมพอร์ต MongoClient
-const { findURLsWithKeywords } = require("./searchKeywords.js"); // ฟังก์ชันค้นหา URL ตามคำหลัก
+const { MongoClient } = require("mongodb");
 const { FAQHandler } = require("./faqHandler.js");
 const { UnansweredQuestionHandler } = require("./unansweredQuestionHandler.js");
 const { connectToDatabase } = require("./database.js");
 
-// การตั้งค่า MongoDB
-const uri = process.env.MONGODB_URI;
+const uri = process.env.MONGODB_URI; // URI ของ MongoDB
 const client = new MongoClient(uri);
 
 const server = restify.createServer();
@@ -37,20 +35,21 @@ class UniversityBot extends ActivityHandler {
 
     this.onMessage(async (context, next) => {
       const text = context.activity.text.trim().toLowerCase(); // ข้อความที่ได้รับ
-      const keywords = text.split(" "); // แยกคำหลักตามคำที่ได้รับ
 
-      const matchingURLs = await findURLsWithKeywords(keywords); // ค้นหา URL ตามคำหลัก
-      let response = "ไม่พบ URL ที่เกี่ยวข้องกับคำค้นของคุณ.";
+      // แสดง FAQs ทั้งหมดหากผู้ใช้ร้องขอ
+      if (text === "show faqs") {
+        await this.faqHandler.handleShowFAQs(context);
+      } else {
+        // ค้นหาใน FAQs ตามข้อความที่ได้รับ
+        await this.faqHandler.handleMessage(context, text);
 
-      if (matchingURLs.length > 0) {
-        response = "URLs ที่เกี่ยวข้อง:\n"; // แสดง URL ที่เกี่ยวข้อง
-        matchingURLs.forEach((url) => {
-          response += `${url}\n`; // เพิ่ม URL ในคำตอบ
-        });
+        // หากไม่พบคำตอบใน FAQs
+        if (!context.activity.isResponded) {
+          await this.unansweredHandler.handleMessage(context, text); // จัดเก็บคำถามที่ไม่มีคำตอบ
+        }
       }
 
-      await context.sendActivity(response); // ส่งคำตอบกลับ
-      await next();
+      await next(); // ดำเนินการต่อ
     });
   }
 }
@@ -67,10 +66,8 @@ server.post("/api/messages", async (req, res) => {
       await bot.run(context);
     });
   } catch (error) {
-    console.error("Error handling message:", error);
-    res
-      .status(500)
-      .send({ error: "เกิดข้อผิดพลาดระหว่างการประมวลผลข้อความของคุณ." });
+    console.error("Error handling message:", error); // จัดการข้อผิดพลาด
+    res.status(500).send({ error: "เกิดข้อผิดพลาดระหว่างการประมวลผลข้อความของคุณ." });
   }
 });
 
